@@ -133,7 +133,7 @@ class Extractor(object):
         print(("!! %s: Cannot delete %s!\n%s" % (function, path, excinfo)))
 
     @staticmethod
-    def io_find_rootfs(start, recurse=True):
+    def io_find_rootfs(start,less_THRESHOLD=False, recurse=True):
         """
         Attempts to find a Linux root directory.
         """
@@ -143,14 +143,18 @@ class Extractor(object):
         while (len(os.listdir(path)) == 1 and
                os.path.isdir(os.path.join(path, os.listdir(path)[0]))):
             path = os.path.join(path, os.listdir(path)[0])
-
+       
         # count number of unix-like directories
         count = 0
         for subdir in os.listdir(path):
             if subdir in Extractor.UNIX_DIRS and \
                 os.path.isdir(os.path.join(path, subdir)):
                 count += 1
-
+        
+        # check for extracted filesystem, which has less threshold
+        if less_THRESHOLD and count >= Extractor.UNIX_THRESHOLD/2:
+            return (True, path)
+            
         # check for extracted filesystem, otherwise update queue
         if count >= Extractor.UNIX_THRESHOLD:
             return (True, path)
@@ -161,7 +165,7 @@ class Extractor(object):
             for subdir in os.listdir(path):
                 if os.path.isdir(os.path.join(path, subdir)):
                     res = Extractor.io_find_rootfs(os.path.join(path, subdir),
-                                                   False)
+                                                   less_THRESHOLD, False)
                     if res[0]:
                         return res
 
@@ -593,17 +597,19 @@ class ExtractionItem(object):
         """
         If this file contains a known filesystem type, extract it.
         """
-
+        less_THRESHOLD = False
         if not self.get_rootfs_status():
             for module in binwalk.scan(self.item, "-e", "-r", "-y",
                                        "filesystem", signature=True,
                                        quiet=True):
                 for entry in module.results:
                     self.printf(">>>> %s" % entry.description)
+                    if not less_THRESHOLD:
+                        less_THRESHOLD = 'cramfs' in entry.description.lower()
                     break
 
                 if module.extractor.directory:
-                    unix = Extractor.io_find_rootfs(module.extractor.directory)
+                    unix = Extractor.io_find_rootfs(module.extractor.directory, less_THRESHOLD)
 
                     if not unix[0]:
                         self.printf(">>>> Extraction failed!")
